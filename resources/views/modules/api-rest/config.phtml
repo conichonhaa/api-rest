@@ -1,0 +1,244 @@
+<?php
+
+use Fisharebest\Webtrees\Http\RequestHandlers\ControlPanel;
+use Fisharebest\Webtrees\I18N;
+use Fisharebest\Webtrees\View;
+
+/**
+ * @var string $title
+ * @var string $module
+ * @var string $api_key
+ * @var string $api_enabled
+ * @var string $log_requests
+ */
+
+?>
+
+<?= view('components/breadcrumbs', ['links' => [route(ControlPanel::class) => I18N::translate('Control panel'), $title]]) ?>
+
+<h1><?= $title ?></h1>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Configuration de l'API REST</h3>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    <?= csrf_field() ?>
+                    
+                    <!-- Activation de l'API -->
+                    <div class="form-group row">
+                        <label class="col-sm-3 col-form-label" for="api_enabled">
+                            Activer l'API
+                        </label>
+                        <div class="col-sm-9">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" 
+                                       id="api_enabled" name="api_enabled" value="1"
+                                       <?= $api_enabled === '1' ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="api_enabled">
+                                    Permettre l'accès à l'API REST
+                                </label>
+                            </div>
+                            <small class="form-text text-muted">
+                                L'API doit être activée pour fonctionner
+                            </small>
+                        </div>
+                    </div>
+
+                    <!-- Log des requêtes -->
+                    <div class="form-group row">
+                        <label class="col-sm-3 col-form-label" for="log_requests">
+                            Logger les requêtes
+                        </label>
+                        <div class="col-sm-9">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" 
+                                       id="log_requests" name="log_requests" value="1"
+                                       <?= $log_requests === '1' ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="log_requests">
+                                    Enregistrer toutes les requêtes API dans les logs
+                                </label>
+                            </div>
+                            <small class="form-text text-muted">
+                                Utile pour le debug et la surveillance
+                            </small>
+                        </div>
+                    </div>
+
+                    <div class="form-group row">
+                        <div class="col-sm-9 offset-sm-3">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save"></i>
+                                Sauvegarder
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Gestion de la clé API -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h3 class="card-title">Clé API</h3>
+            </div>
+            <div class="card-body">
+                <?php if (empty($api_key)): ?>
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Aucune clé API n'est configurée. Générez-en une pour sécuriser l'accès à votre API.
+                    </div>
+                    <form method="post">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="generate_key" value="1">
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-key"></i>
+                            Générer une clé API
+                        </button>
+                    </form>
+                <?php else: ?>
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle"></i>
+                        Clé API configurée
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="api_key_display">Clé API actuelle :</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control font-monospace" 
+                                   id="api_key_display" value="<?= e($api_key) ?>" readonly>
+                            <div class="input-group-append">
+                                <button class="btn btn-outline-secondary" type="button" 
+                                        onclick="copyToClipboard('api_key_display')">
+                                    <i class="fas fa-copy"></i>
+                                    Copier
+                                </button>
+                            </div>
+                        </div>
+                        <small class="form-text text-muted">
+                            Gardez cette clé secrète et ne la partagez qu'avec les applications autorisées.
+                        </small>
+                    </div>
+
+                    <form method="post" class="mt-3">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="generate_key" value="1">
+                        <button type="submit" class="btn btn-warning" 
+                                onclick="return confirm('Êtes-vous sûr de vouloir générer une nouvelle clé ? L\'ancienne ne fonctionnera plus.')">
+                            <i class="fas fa-sync-alt"></i>
+                            Générer une nouvelle clé
+                        </button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Documentation -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Documentation API</h3>
+            </div>
+            <div class="card-body">
+                <h5>Endpoints disponibles :</h5>
+                <ul class="list-unstyled">
+                    <li><code>GET /api/individuals/{tree_id}</code></li>
+                    <li><code>GET /api/families/{tree_id}</code></li>
+                </ul>
+
+                <h5>Authentification :</h5>
+                <p>Deux méthodes possibles :</p>
+                <ul>
+                    <li>Header: <code>Authorization: Bearer YOUR_API_KEY</code></li>
+                    <li>Paramètre: <code>?api_key=YOUR_API_KEY</code></li>
+                </ul>
+
+                <h5>Paramètres de pagination :</h5>
+                <ul>
+                    <li><code>limit</code> : Nombre d'éléments (max 1000)</li>
+                    <li><code>offset</code> : Décalage pour la pagination</li>
+                </ul>
+
+                <h5>Exemple d'utilisation :</h5>
+                <pre class="bg-light p-2 small"><code>curl -H "Authorization: Bearer YOUR_API_KEY" \
+     "<?= e(request()->getSchemeAndHttpHost()) ?>/api/individuals/1?limit=10"</code></pre>
+            </div>
+        </div>
+
+        <?php if (!empty($api_key) && $api_enabled === '1'): ?>
+        <div class="card mt-3">
+            <div class="card-header">
+                <h3 class="card-title">Test rapide</h3>
+            </div>
+            <div class="card-body">
+                <p>Testez votre API directement :</p>
+                <button class="btn btn-info btn-sm" onclick="testApi()">
+                    <i class="fas fa-play"></i>
+                    Tester l'API
+                </button>
+                <div id="api-test-result" class="mt-2"></div>
+            </div>
+        </div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<script>
+function copyToClipboard(elementId) {
+    const element = document.getElementById(elementId);
+    element.select();
+    element.setSelectionRange(0, 99999);
+    document.execCommand('copy');
+    
+    // Feedback visuel
+    const button = element.nextElementSibling.querySelector('button');
+    const originalText = button.innerHTML;
+    button.innerHTML = '<i class="fas fa-check"></i> Copié !';
+    button.classList.add('btn-success');
+    button.classList.remove('btn-outline-secondary');
+    
+    setTimeout(() => {
+        button.innerHTML = originalText;
+        button.classList.remove('btn-success');
+        button.classList.add('btn-outline-secondary');
+    }, 2000);
+}
+
+<?php if (!empty($api_key) && $api_enabled === '1'): ?>
+async function testApi() {
+    const resultDiv = document.getElementById('api-test-result');
+    resultDiv.innerHTML = '<div class="spinner-border spinner-border-sm" role="status"></div> Test en cours...';
+    
+    try {
+        // Récupérer la liste des arbres pour tester avec le premier
+        const response = await fetch('<?= e(request()->getSchemeAndHttpHost()) ?>/api/individuals/1?limit=1&api_key=<?= e($api_key) ?>');
+        const data = await response.json();
+        
+        if (response.ok) {
+            resultDiv.innerHTML = `
+                <div class="alert alert-success alert-sm">
+                    <i class="fas fa-check"></i> API fonctionnelle !<br>
+                    <small>Retourné : ${data.meta.returned} élément(s)</small>
+                </div>
+            `;
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger alert-sm">
+                    <i class="fas fa-times"></i> Erreur : ${data.error || 'Erreur inconnue'}
+                </div>
+            `;
+        }
+    } catch (error) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger alert-sm">
+                <i class="fas fa-times"></i> Erreur de connexion : ${error.message}
+            </div>
+        `;
+    }
+}
+<?php endif; ?>
+</script>
