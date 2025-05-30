@@ -167,6 +167,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
         // Gérer les appels API via les paramètres d'URL
         $query_params = $request->getQueryParams();
         $action = $query_params['action'] ?? 'show';
+        $subaction = $query_params['subaction'] ?? '';
         $api_action = $query_params['api'] ?? '';
         
         // Si c'est un appel API
@@ -174,15 +175,18 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
             return $this->handleApiRequest($request, $api_action);
         }
         
-        // Sinon, gérer la configuration normale
-        switch ($action) {
-            case 'generate':
-                return $this->generateApiKey($request);
-            case 'delete':
-                return $this->deleteApiKey($request);
-            default:
-                return $this->showConfig();
+        // Gérer la génération de clé via POST ou GET avec subaction
+        if ($request->getMethod() === 'POST' || $subaction === 'generate') {
+            return $this->generateApiKey($request);
         }
+        
+        // Gérer la suppression
+        if ($subaction === 'delete') {
+            return $this->deleteApiKey($request);
+        }
+        
+        // Sinon, afficher la configuration
+        return $this->showConfig();
     }
 
     /**
@@ -232,8 +236,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
 
         $generate_url = route('module', [
             'module' => $this->name(),
-            'action' => 'Config',
-            'subaction' => 'generate'
+            'action' => 'Config'
         ]);
 
         return "
@@ -283,15 +286,15 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
                 <div class='card-body'>
                     <h4>Endpoints disponibles :</h4>
                     <ul>
-                        <li><code>GET /index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees</code> - Liste des arbres généalogiques</li>
-                        <li><code>GET /index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individuals&amp;tree=TREE_NAME</code> - Liste des individus d'un arbre</li>
-                        <li><code>GET /index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individual&amp;tree=TREE_NAME&amp;xref=XREF</code> - Détails d'un individu</li>
+                        <li><code>GET https://genealogie.vahinecestgonfle.com/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees</code> - Liste des arbres généalogiques</li>
+                        <li><code>GET https://genealogie.vahinecestgonfle.com/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individuals&amp;tree=TREE_NAME</code> - Liste des individus d'un arbre</li>
+                        <li><code>GET https://genealogie.vahinecestgonfle.com/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individual&amp;tree=TREE_NAME&amp;xref=XREF</code> - Détails d'un individu</li>
                     </ul>
                     <h4>Utilisation :</h4>
                     <p>Ajoutez l'en-tête <code>X-API-Key: votre_cle_api</code> à vos requêtes.</p>
                     <p>Exemple :</p>
                     <pre><code>curl -H 'X-API-Key: votre_cle_api' \
-     'https://votre-domaine.com/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees'</code></pre>
+     'https://genealogie.vahinecestgonfle.com/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees'</code></pre>
                 </div>
             </div>
         </div>";
@@ -302,7 +305,11 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
      */
     private function generateApiKey(ServerRequestInterface $request): ResponseInterface
     {
-        $params = (array) $request->getParsedBody();
+        // Récupérer les données POST ou GET
+        $params = $request->getMethod() === 'POST' 
+            ? (array) $request->getParsedBody() 
+            : $request->getQueryParams();
+            
         $name = $params['key_name'] ?? '';
 
         if (empty($name)) {
@@ -310,6 +317,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
             return redirect($this->getConfigLink());
         }
 
+        // Générer une clé API aléatoirement
         $api_key = bin2hex(random_bytes(32));
 
         DB::table(self::API_KEYS_TABLE)->insert([
@@ -317,7 +325,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
             'api_key' => $api_key,
         ]);
 
-        FlashMessages::addMessage(I18N::translate('API key generated successfully'), 'success');
+        FlashMessages::addMessage(I18N::translate('API key generated successfully') . ': ' . $api_key, 'success');
         return redirect($this->getConfigLink());
     }
 
