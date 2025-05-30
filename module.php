@@ -1,7 +1,7 @@
 <?php
 
 /**
- * API REST Module for webtrees 2.2
+ * API REST Module for webtrees 2.2 - VERSION CORRIGÉE
  */
 
 declare(strict_types=1);
@@ -62,7 +62,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
      */
     public function customModuleVersion(): string
     {
-        return '1.0.0';
+        return '1.0.1'; // Version corrigée
     }
 
     /**
@@ -128,9 +128,6 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
     {
         // Créer la table des clés API si elle n'existe pas
         $this->createApiKeysTable();
-        
-        // Pour webtrees 2.2, nous devons gérer les routes différemment
-        // Les routes API seront gérées via des actions du module
     }
 
     /**
@@ -170,13 +167,19 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
         $subaction = $query_params['subaction'] ?? '';
         $api_action = $query_params['api'] ?? '';
         
+        // CORRECTION: Log pour debugging
+        error_log("API Rest Debug - Method: " . $request->getMethod());
+        error_log("API Rest Debug - Subaction: " . $subaction);
+        error_log("API Rest Debug - API Action: " . $api_action);
+        
         // Si c'est un appel API
         if ($api_action) {
             return $this->handleApiRequest($request, $api_action);
         }
         
-        // Gérer la génération de clé via POST ou GET avec subaction
-        if ($request->getMethod() === 'POST' || $subaction === 'generate') {
+        // CORRECTION: Gérer la génération de clé pour les requêtes POST
+        if ($request->getMethod() === 'POST') {
+            error_log("API Rest Debug - Processing POST request for key generation");
             return $this->generateApiKey($request);
         }
         
@@ -197,6 +200,9 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
         $api_keys = DB::table(self::API_KEYS_TABLE)
             ->orderBy('created_at', 'desc')
             ->get();
+
+        // CORRECTION: Log pour debugging
+        error_log("API Rest Debug - Found " . count($api_keys) . " API keys");
 
         $html = $this->getConfigHtml($api_keys);
         
@@ -227,10 +233,10 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
             ]);
             
             $rows .= "<tr>
-                <td>{$key->name}</td>
-                <td><code>{$key->api_key}</code></td>
-                <td>{$key->created_at}</td>
-                <td><a href='{$delete_url}' class='btn btn-danger btn-sm' onclick='return confirm(\"Êtes-vous sûr ?\");'>{$delete_label}</a></td>
+                <td>" . e($key->name) . "</td>
+                <td><code>" . e($key->api_key) . "</code></td>
+                <td>" . e($key->created_at) . "</td>
+                <td><a href='" . e($delete_url) . "' class='btn btn-danger btn-sm' onclick='return confirm(\"Êtes-vous sûr ?\");'>" . e($delete_label) . "</a></td>
             </tr>";
         }
 
@@ -239,21 +245,25 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
             'action' => 'Config'
         ]);
 
+        // CORRECTION: Ajout du token CSRF
+        $csrf_token = csrf_token();
+
         return "
         <div class='container-fluid'>
-            <h2>{$title}</h2>
+            <h2>" . e($title) . "</h2>
             
             <div class='card mb-4'>
                 <div class='card-header'>
-                    <h3>{$generate_label}</h3>
+                    <h3>" . e($generate_label) . "</h3>
                 </div>
                 <div class='card-body'>
-                    <form method='post' action='{$generate_url}'>
+                    <form method='post' action='" . e($generate_url) . "'>
+                        <input type='hidden' name='_token' value='" . e($csrf_token) . "'>
                         <div class='form-group'>
-                            <label for='key_name'>{$name_label}</label>
+                            <label for='key_name'>" . e($name_label) . "</label>
                             <input type='text' class='form-control' id='key_name' name='key_name' required>
                         </div>
-                        <button type='submit' class='btn btn-primary'>{$generate_button}</button>
+                        <button type='submit' class='btn btn-primary'>" . e($generate_button) . "</button>
                     </form>
                 </div>
             </div>
@@ -267,9 +277,9 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
                         <thead>
                             <tr>
                                 <th>Nom</th>
-                                <th>{$key_label}</th>
-                                <th>{$created_label}</th>
-                                <th>{$actions_label}</th>
+                                <th>" . e($key_label) . "</th>
+                                <th>" . e($created_label) . "</th>
+                                <th>" . e($actions_label) . "</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -293,7 +303,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
                     <h4>Utilisation :</h4>
                     <p>Ajoutez l'en-tête <code>X-API-Key: votre_cle_api</code> à vos requêtes.</p>
                     <p>Exemple :</p>
-                    <pre><code>curl -H 'X-API-Key: votre_cle_api' \
+                    <pre><code>curl -H 'X-API-Key: votre_cle_api' \\
      'https://genealogie.vahinecestgonfle.com/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees'</code></pre>
                 </div>
             </div>
@@ -305,27 +315,54 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
      */
     private function generateApiKey(ServerRequestInterface $request): ResponseInterface
     {
-        // Récupérer les données POST ou GET
-        $params = $request->getMethod() === 'POST' 
-            ? (array) $request->getParsedBody() 
-            : $request->getQueryParams();
-            
-        $name = $params['key_name'] ?? '';
+        // CORRECTION: Meilleure gestion des données POST
+        $parsed_body = $request->getParsedBody();
+        
+        // Log pour debugging
+        error_log("API Rest Debug - Parsed body: " . print_r($parsed_body, true));
+        
+        if (!is_array($parsed_body)) {
+            error_log("API Rest Debug - Parsed body is not an array");
+            FlashMessages::addMessage('Erreur lors de la récupération des données du formulaire', 'danger');
+            return redirect($this->getConfigLink());
+        }
+        
+        $name = $parsed_body['key_name'] ?? '';
+        
+        error_log("API Rest Debug - Key name: " . $name);
 
         if (empty($name)) {
+            error_log("API Rest Debug - Key name is empty");
             FlashMessages::addMessage('Le nom de la clé est requis', 'danger');
             return redirect($this->getConfigLink());
         }
 
         // Générer une clé API aléatoirement
         $api_key = bin2hex(random_bytes(32));
+        
+        error_log("API Rest Debug - Generated API key: " . $api_key);
 
-        DB::table(self::API_KEYS_TABLE)->insert([
-            'name' => $name,
-            'api_key' => $api_key,
-        ]);
+        try {
+            // CORRECTION: Utiliser insert avec gestion d'erreur
+            $result = DB::table(self::API_KEYS_TABLE)->insert([
+                'name' => $name,
+                'api_key' => $api_key,
+            ]);
+            
+            error_log("API Rest Debug - Insert result: " . ($result ? 'success' : 'failed'));
+            
+            if ($result) {
+                FlashMessages::addMessage(I18N::translate('API key generated successfully') . ': ' . $api_key, 'success');
+                error_log("API Rest Debug - API key inserted successfully");
+            } else {
+                FlashMessages::addMessage('Erreur lors de la génération de la clé API', 'danger');
+                error_log("API Rest Debug - Failed to insert API key");
+            }
+        } catch (\Exception $e) {
+            error_log("API Rest Debug - Exception during insert: " . $e->getMessage());
+            FlashMessages::addMessage('Erreur lors de la génération de la clé API: ' . $e->getMessage(), 'danger');
+        }
 
-        FlashMessages::addMessage(I18N::translate('API key generated successfully') . ': ' . $api_key, 'success');
         return redirect($this->getConfigLink());
     }
 
@@ -337,8 +374,12 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
         $id = $request->getQueryParams()['id'] ?? '';
 
         if ($id) {
-            DB::table(self::API_KEYS_TABLE)->where('id', '=', $id)->delete();
-            FlashMessages::addMessage(I18N::translate('API key deleted successfully'), 'success');
+            $result = DB::table(self::API_KEYS_TABLE)->where('id', '=', $id)->delete();
+            if ($result) {
+                FlashMessages::addMessage(I18N::translate('API key deleted successfully'), 'success');
+            } else {
+                FlashMessages::addMessage('Erreur lors de la suppression de la clé API', 'danger');
+            }
         }
 
         return redirect($this->getConfigLink());
