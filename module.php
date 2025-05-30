@@ -1,7 +1,7 @@
 <?php
 
 /**
- * API REST Module for webtrees 2.2 - VERSION CORRIGÉE AVEC ROUTING INTÉGRÉ
+ * API REST Module for webtrees 2.2 - VERSION AVEC AUTHENTIFICATION LOGIN/PASSWORD
  */
 
 declare(strict_types=1);
@@ -17,20 +17,19 @@ use Fisharebest\Webtrees\Registry;
 use Fisharebest\Webtrees\I18N;
 use Fisharebest\Webtrees\FlashMessages;
 use Fisharebest\Webtrees\Services\TreeService;
+use Fisharebest\Webtrees\Services\UserService;
 use Fisharebest\Webtrees\Tree;
 use Fisharebest\Webtrees\DB;
-use Fisharebest\Webtrees\Http\RequestHandlers\AbstractHandler;
+use Fisharebest\Webtrees\User;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 
 /**
- * API REST Module with integrated routing
+ * API REST Module with login/password authentication
  */
 return new class extends AbstractModule implements ModuleCustomInterface, ModuleConfigInterface {
     use ModuleCustomTrait;
     use ModuleConfigTrait;
-
-    private const API_KEYS_TABLE = 'api_rest_keys';
 
     /**
      * How should this module be identified in the control panel, etc.?
@@ -45,7 +44,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
      */
     public function description(): string
     {
-        return 'Module API REST avec gestion des clés API pour webtrees 2.2';
+        return 'Module API REST avec authentification login/password pour webtrees 2.2';
     }
 
     /**
@@ -61,7 +60,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
      */
     public function customModuleVersion(): string
     {
-        return '1.0.3'; // Version avec routing intégré
+        return '1.1.0'; // Version avec authentification login/password
     }
 
     /**
@@ -77,191 +76,313 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
      */
     public function boot(): void
     {
-        // Créer la table des clés API si elle n'existe pas
-        $this->createApiKeysTable();
-        
-        // Les routes API seront gérées via les actions du module
-        // Pas besoin d'enregistrer des routes séparées
+        // Créer le fichier API endpoint
+        $this->createApiEndpoint();
     }
 
     /**
-     * Handle module actions (including API endpoints)
+     * Create standalone API endpoint file
      */
-    public function getAction(ServerRequestInterface $request): ResponseInterface
+    private function createApiEndpoint(): void
     {
-        $action = $request->getQueryParams()['action'] ?? '';
+        $module_path = __DIR__;
+        $api_file = $module_path . '/api.php';
         
-        switch ($action) {
-            case 'Config':
-                return $this->getConfigAction($request);
-            case 'api-trees':
-                return $this->handleTreesApi($request);
-            case 'api-individuals':
-                return $this->handleIndividualsApi($request);
-            case 'api-individual':
-                return $this->handleIndividualApi($request);
-            default:
-                return $this->getConfigAction($request);
+        if (!file_exists($api_file)) {
+            $api_content = $this->getApiContent();
+            file_put_contents($api_file, $api_content);
         }
     }
 
     /**
-     * Validate API key from request
+     * Get API endpoint content
      */
-    private function validateApiKey(ServerRequestInterface $request): bool
+    private function getApiContent(): string
     {
-        $api_key = $request->getHeaderLine('X-API-Key');
-        
-        if (empty($api_key)) {
-            // Essayer aussi dans les paramètres GET pour les tests
-            $api_key = $request->getQueryParams()['api_key'] ?? '';
+        return '<?php
+/**
+ * Standalone API endpoint with login/password authentication
+ */
+
+// Headers pour API REST
+header("Content-Type: application/json");
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Authorization");
+
+// Gestion des requêtes OPTIONS (CORS preflight)
+if ($_SERVER["REQUEST_METHOD"] == "OPTIONS") {
+    exit(0);
+}
+
+// Inclure webtrees bootstrap
+require_once __DIR__ . "/../../../../index.php";
+
+// Fonction d\'authentification
+function authenticateUser() {
+    $username = null;
+    $password = null;
+    
+    // Essayer HTTP Basic Auth
+    if (isset($_SERVER["HTTP_AUTHORIZATION"])) {
+        $auth = $_SERVER["HTTP_AUTHORIZATION"];
+        if (strpos($auth, "Basic ") === 0) {
+            $credentials = base64_decode(substr($auth, 6));
+            list($username, $password) = explode(":", $credentials, 2);
         }
-        
-        if (empty($api_key)) {
-            return false;
-        }
-        
-        return DB::table(self::API_KEYS_TABLE)
-            ->where('api_key', '=', $api_key)
-            ->exists();
     }
-
-    /**
-     * Create JSON response
-     */
-    private function jsonResponse($data, int $status = 200): ResponseInterface
-    {
-        $response = response(json_encode($data, JSON_THROW_ON_ERROR));
-        
-        return $response
-            ->withHeader('Content-Type', 'application/json')
-            ->withStatus($status)
-            ->withHeader('Access-Control-Allow-Origin', '*')
-            ->withHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            ->withHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
+    
+    // Essayer les paramètres GET/POST
+    if (empty($username)) {
+        $username = $_GET["username"] ?? $_POST["username"] ?? "";
+        $password = $_GET["password"] ?? $_POST["password"] ?? "";
     }
-
-    /**
-     * Handle trees API endpoint
-     */
-    public function handleTreesApi(ServerRequestInterface $request): ResponseInterface
-    {
-        if (!$this->validateApiKey($request)) {
-            return $this->jsonResponse(['error' => 'Invalid API key'], 401);
-        }
-
-        $tree_service = Registry::container()->get(TreeService::class);
-        $trees = $tree_service->all();
-
-        $result = [];
-        foreach ($trees as $tree) {
-            $result[] = [
-                'id' => $tree->id(),
-                'name' => $tree->name(),
-                'title' => $tree->title(),
-            ];
-        }
-
-        return $this->jsonResponse($result);
+    
+    if (empty($username) || empty($password)) {
+        return null;
     }
-
-    /**
-     * Handle individuals API endpoint
-     */
-    public function handleIndividualsApi(ServerRequestInterface $request): ResponseInterface
-    {
-        if (!$this->validateApiKey($request)) {
-            return $this->jsonResponse(['error' => 'Invalid API key'], 401);
-        }
-
-        $params = $request->getQueryParams();
-        $tree_name = $params['tree'] ?? '';
-        
-        if (empty($tree_name)) {
-            return $this->jsonResponse(['error' => 'Tree parameter required'], 400);
-        }
-
-        $tree_service = Registry::container()->get(TreeService::class);
-        $tree = $tree_service->find($tree_name);
-
-        if (!$tree) {
-            return $this->jsonResponse(['error' => 'Tree not found'], 404);
-        }
-
-        $limit = min((int) ($params['limit'] ?? 50), 100);
-        $offset = max((int) ($params['offset'] ?? 0), 0);
-
-        $individuals = DB::table('individuals')
-            ->where('i_file', '=', $tree->id())
-            ->limit($limit)
-            ->offset($offset)
-            ->get();
-
-        $result = [];
-        foreach ($individuals as $individual) {
-            $result[] = [
-                'xref' => $individual->i_id,
-                'gedcom' => $individual->i_gedcom,
-            ];
-        }
-
-        return $this->jsonResponse($result);
+    
+    // Vérifier les credentials dans la base webtrees
+    $user_service = \\Fisharebest\\Webtrees\\Registry::container()->get(\\Fisharebest\\Webtrees\\Services\\UserService::class);
+    $user = $user_service->findByUserName($username);
+    
+    if ($user && password_verify($password, $user->getPreference("password"))) {
+        return $user;
     }
+    
+    return null;
+}
 
-    /**
-     * Handle individual API endpoint
-     */
-    public function handleIndividualApi(ServerRequestInterface $request): ResponseInterface
-    {
-        if (!$this->validateApiKey($request)) {
-            return $this->jsonResponse(['error' => 'Invalid API key'], 401);
-        }
+// Fonction de réponse JSON
+function jsonResponse($data, $status = 200) {
+    http_response_code($status);
+    echo json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
-        $params = $request->getQueryParams();
-        $tree_name = $params['tree'] ?? '';
-        $xref = $params['xref'] ?? '';
-        
-        if (empty($tree_name) || empty($xref)) {
-            return $this->jsonResponse(['error' => 'Tree and xref parameters required'], 400);
-        }
-        
-        $tree_service = Registry::container()->get(TreeService::class);
-        $tree = $tree_service->find($tree_name);
+// Vérifier l\'authentification
+$user = authenticateUser();
+if (!$user) {
+    jsonResponse([
+        "error" => "Authentication required",
+        "message" => "Please provide valid username and password via Basic Auth or parameters"
+    ], 401);
+}
 
-        if (!$tree) {
-            return $this->jsonResponse(['error' => 'Tree not found'], 404);
-        }
+// Router les requêtes API
+$endpoint = $_GET["endpoint"] ?? "";
 
-        $individual = Registry::individualFactory()->make($xref, $tree);
+switch ($endpoint) {
+    case "trees":
+        handleTreesRequest();
+        break;
+    case "individuals":
+        handleIndividualsRequest($user);
+        break;
+    case "individual":
+        handleIndividualRequest($user);
+        break;
+    case "user":
+        handleUserRequest($user);
+        break;
+    default:
+        jsonResponse([
+            "error" => "Unknown endpoint",
+            "available_endpoints" => [
+                "trees" => "List all family trees",
+                "individuals" => "List individuals (requires tree parameter)",
+                "individual" => "Get individual details (requires tree and xref parameters)",
+                "user" => "Get current user info"
+            ]
+        ], 404);
+}
 
-        if (!$individual) {
-            return $this->jsonResponse(['error' => 'Individual not found'], 404);
-        }
+function handleTreesRequest() {
+    $tree_service = \\Fisharebest\\Webtrees\\Registry::container()->get(\\Fisharebest\\Webtrees\\Services\\TreeService::class);
+    $trees = $tree_service->all();
 
-        $result = [
-            'xref' => $individual->xref(),
-            'name' => $individual->fullName(),
-            'birth_date' => $individual->getBirthDate()->display(),
-            'death_date' => $individual->getDeathDate()->display(),
-            'gedcom' => $individual->gedcom(),
+    $result = [];
+    foreach ($trees as $tree) {
+        $result[] = [
+            "id" => $tree->id(),
+            "name" => $tree->name(),
+            "title" => $tree->title(),
+            "individuals_count" => \\Fisharebest\\Webtrees\\DB::table("individuals")
+                ->where("i_file", "=", $tree->id())
+                ->count()
         ];
-
-        return $this->jsonResponse($result);
     }
 
-    /**
-     * Create API keys table
-     */
-    private function createApiKeysTable(): void
-    {
-        if (!DB::schema()->hasTable(self::API_KEYS_TABLE)) {
-            DB::schema()->create(self::API_KEYS_TABLE, function ($table) {
-                $table->increments('id');
-                $table->string('name', 100);
-                $table->string('api_key', 64)->unique();
-                $table->timestamp('created_at')->useCurrent();
-            });
+    jsonResponse([
+        "success" => true,
+        "data" => $result,
+        "count" => count($result)
+    ]);
+}
+
+function handleIndividualsRequest($user) {
+    $tree_name = $_GET["tree"] ?? "";
+    
+    if (empty($tree_name)) {
+        jsonResponse([
+            "error" => "Tree parameter required",
+            "example" => "?endpoint=individuals&tree=tree_name"
+        ], 400);
+    }
+
+    $tree_service = \\Fisharebest\\Webtrees\\Registry::container()->get(\\Fisharebest\\Webtrees\\Services\\TreeService::class);
+    $tree = $tree_service->find($tree_name);
+
+    if (!$tree) {
+        jsonResponse(["error" => "Tree not found"], 404);
+    }
+
+    // Vérifier les permissions
+    if (!$tree->canShow($user)) {
+        jsonResponse(["error" => "Access denied to this tree"], 403);
+    }
+
+    $limit = min((int) ($_GET["limit"] ?? 50), 500);
+    $offset = max((int) ($_GET["offset"] ?? 0), 0);
+    $search = $_GET["search"] ?? "";
+
+    $query = \\Fisharebest\\Webtrees\\DB::table("individuals")
+        ->where("i_file", "=", $tree->id());
+    
+    if (!empty($search)) {
+        $query->where("i_gedcom", "LIKE", "%".addslashes($search)."%");
+    }
+    
+    $total = $query->count();
+    $individuals = $query->limit($limit)->offset($offset)->get();
+
+    $result = [];
+    foreach ($individuals as $individual_record) {
+        $individual = \\Fisharebest\\Webtrees\\Registry::individualFactory()->make($individual_record->i_id, $tree);
+        if ($individual && $individual->canShow($user)) {
+            $result[] = [
+                "xref" => $individual->xref(),
+                "name" => $individual->fullName(),
+                "birth_date" => $individual->getBirthDate()->display(),
+                "death_date" => $individual->getDeathDate()->display(),
+                "sex" => $individual->sex()
+            ];
         }
+    }
+
+    jsonResponse([
+        "success" => true,
+        "data" => $result,
+        "pagination" => [
+            "total" => $total,
+            "limit" => $limit,
+            "offset" => $offset,
+            "count" => count($result)
+        ]
+    ]);
+}
+
+function handleIndividualRequest($user) {
+    $tree_name = $_GET["tree"] ?? "";
+    $xref = $_GET["xref"] ?? "";
+    
+    if (empty($tree_name) || empty($xref)) {
+        jsonResponse([
+            "error" => "Tree and xref parameters required",
+            "example" => "?endpoint=individual&tree=tree_name&xref=I1"
+        ], 400);
+    }
+    
+    $tree_service = \\Fisharebest\\Webtrees\\Registry::container()->get(\\Fisharebest\\Webtrees\\Services\\TreeService::class);
+    $tree = $tree_service->find($tree_name);
+
+    if (!$tree) {
+        jsonResponse(["error" => "Tree not found"], 404);
+    }
+
+    if (!$tree->canShow($user)) {
+        jsonResponse(["error" => "Access denied to this tree"], 403);
+    }
+
+    $individual = \\Fisharebest\\Webtrees\\Registry::individualFactory()->make($xref, $tree);
+
+    if (!$individual) {
+        jsonResponse(["error" => "Individual not found"], 404);
+    }
+
+    if (!$individual->canShow($user)) {
+        jsonResponse(["error" => "Access denied to this individual"], 403);
+    }
+
+    $result = [
+        "xref" => $individual->xref(),
+        "name" => $individual->fullName(),
+        "birth_date" => $individual->getBirthDate()->display(),
+        "death_date" => $individual->getDeathDate()->display(),
+        "birth_place" => $individual->getBirthPlace()->gedcomName(),
+        "death_place" => $individual->getDeathPlace()->gedcomName(),
+        "sex" => $individual->sex(),
+        "gedcom" => $individual->gedcom()
+    ];
+
+    // Ajouter les parents
+    $families = $individual->childFamilies();
+    $parents = [];
+    foreach ($families as $family) {
+        if ($family->husband()) {
+            $parents["father"] = [
+                "xref" => $family->husband()->xref(),
+                "name" => $family->husband()->fullName()
+            ];
+        }
+        if ($family->wife()) {
+            $parents["mother"] = [
+                "xref" => $family->wife()->xref(),
+                "name" => $family->wife()->fullName()
+            ];
+        }
+    }
+    if (!empty($parents)) {
+        $result["parents"] = $parents;
+    }
+
+    // Ajouter les conjoints
+    $spouses = [];
+    foreach ($individual->spouseFamilies() as $family) {
+        $spouse = $family->spouse($individual);
+        if ($spouse) {
+            $spouses[] = [
+                "xref" => $spouse->xref(),
+                "name" => $spouse->fullName()
+            ];
+        }
+    }
+    if (!empty($spouses)) {
+        $result["spouses"] = $spouses;
+    }
+
+    jsonResponse([
+        "success" => true,
+        "data" => $result
+    ]);
+}
+
+function handleUserRequest($user) {
+    jsonResponse([
+        "success" => true,
+        "data" => [
+            "id" => $user->id(),
+            "username" => $user->userName(),
+            "real_name" => $user->realName(),
+            "email" => $user->email(),
+            "preferences" => [
+                "language" => $user->getPreference("language"),
+                "theme" => $user->getPreference("theme")
+            ]
+        ]
+    ]);
+}
+';
     }
 
     /**
@@ -280,20 +401,6 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
      */
     public function getConfigAction(ServerRequestInterface $request): ResponseInterface
     {
-        $query_params = $request->getQueryParams();
-        $subaction = $query_params['subaction'] ?? '';
-        
-        // Gérer la suppression
-        if ($subaction === 'delete') {
-            return $this->deleteApiKey($request);
-        }
-        
-        // Gérer la génération d'une nouvelle clé
-        if ($subaction === 'generate') {
-            return $this->generateApiKey($request);
-        }
-        
-        // Afficher la configuration
         return $this->showConfig();
     }
 
@@ -302,101 +409,25 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
      */
     private function showConfig(): ResponseInterface
     {
-        // Vérifier s'il faut générer une clé automatiquement
-        $this->ensureApiKeyExists();
-        
-        $api_keys = DB::table(self::API_KEYS_TABLE)
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        $html = $this->getConfigHtml($api_keys);
-        
+        $html = $this->getConfigHtml();
         return response($html);
-    }
-
-    /**
-     * Generate new API key
-     */
-    private function generateApiKey(ServerRequestInterface $request): ResponseInterface
-    {
-        $params = $request->getQueryParams();
-        $name = $params['name'] ?? 'Nouvelle clé API - ' . date('Y-m-d H:i:s');
-        
-        $api_key = bin2hex(random_bytes(32));
-        
-        DB::table(self::API_KEYS_TABLE)->insert([
-            'name' => $name,
-            'api_key' => $api_key,
-        ]);
-        
-        FlashMessages::addMessage(I18N::translate('API key generated successfully'), 'success');
-        
-        return redirect($this->getConfigLink());
-    }
-
-    /**
-     * Ensure at least one API key exists
-     */
-    private function ensureApiKeyExists(): void
-    {
-        $count = DB::table(self::API_KEYS_TABLE)->count();
-        
-        if ($count === 0) {
-            $api_key = bin2hex(random_bytes(32));
-            
-            DB::table(self::API_KEYS_TABLE)->insert([
-                'name' => 'Clé API automatique - ' . date('Y-m-d H:i:s'),
-                'api_key' => $api_key,
-            ]);
-        }
     }
 
     /**
      * Generate HTML for configuration page
      */
-    private function getConfigHtml($api_keys): string
+    private function getConfigHtml(): string
     {
-        $title = I18N::translate('API Key Management');
-        $key_label = I18N::translate('API Key');
-        $created_label = I18N::translate('Created');
-        $actions_label = I18N::translate('Actions');
-        $delete_label = I18N::translate('Delete');
-        $generate_label = I18N::translate('Generate');
+        $title = I18N::translate('API REST Configuration');
 
-        $rows = '';
-        $current_api_key = '';
-        
-        foreach ($api_keys as $key) {
-            if (empty($current_api_key)) {
-                $current_api_key = $key->api_key;
-            }
-            
-            $delete_url = route('module', [
-                'module' => $this->name(),
-                'action' => 'Config',
-                'subaction' => 'delete',
-                'id' => $key->id
-            ]);
-            
-            $rows .= "<tr>
-                <td>" . e($key->name) . "</td>
-                <td><code>" . e($key->api_key) . "</code></td>
-                <td>" . e($key->created_at) . "</td>
-                <td><a href='" . e($delete_url) . "' class='btn btn-danger btn-sm' onclick='return confirm(\"Êtes-vous sûr ?\");'>" . e($delete_label) . "</a></td>
-            </tr>";
-        }
-
-        // URL de base pour l'API
+        // URL de base pour l\'API
         $base_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'];
         if (isset($_SERVER['SERVER_PORT']) && !in_array($_SERVER['SERVER_PORT'], [80, 443])) {
             $base_url .= ':' . $_SERVER['SERVER_PORT'];
         }
-
-        $generate_url = route('module', [
-            'module' => $this->name(),
-            'action' => 'Config',
-            'subaction' => 'generate'
-        ]);
+        
+        $module_path = str_replace($_SERVER['DOCUMENT_ROOT'], '', __DIR__);
+        $api_url = $base_url . $module_path . '/api.php';
 
         return "
         <div class='container-fluid'>
@@ -404,90 +435,71 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
 
             <div class='card'>
                 <div class='card-header'>
-                    <h3>Clés API existantes</h3>
-                    <a href='" . e($generate_url) . "' class='btn btn-primary'>" . e($generate_label) . "</a>
-                </div>
-                <div class='card-body'>
-                    <table class='table table-striped'>
-                        <thead>
-                            <tr>
-                                <th>Nom</th>
-                                <th>" . e($key_label) . "</th>
-                                <th>" . e($created_label) . "</th>
-                                <th>" . e($actions_label) . "</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {$rows}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <div class='card mt-4'>
-                <div class='card-header'>
-                    <h3>Documentation API</h3>
+                    <h3>🔐 Authentification Login/Password</h3>
                 </div>
                 <div class='card-body'>
                     <div class='alert alert-info'>
-                        <h4>🔑 Votre clé API :</h4>
-                        <p><strong><code>" . e($current_api_key) . "</code></strong></p>
-                        <p><small>Utilisez cette clé dans l'en-tête <code>X-API-Key</code> de vos requêtes.</small></p>
+                        <h4>📝 Comment utiliser l'API :</h4>
+                        <p>Cette API utilise vos identifiants webtrees existants (login/mot de passe).</p>
+                        <p><strong>URL de l'API :</strong> <code>{$api_url}</code></p>
                     </div>
                     
-                    <h4>Endpoints disponibles :</h4>
+                    <h4>🔗 Endpoints disponibles :</h4>
                     <ul>
-                        <li><code>GET {$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-trees</code> - Liste des arbres généalogiques</li>
-                        <li><code>GET {$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-individuals&tree=TREE_NAME</code> - Liste des individus d'un arbre</li>
-                        <li><code>GET {$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-individual&tree=TREE_NAME&xref=XREF</code> - Détails d'un individu</li>
+                        <li><code>GET {$api_url}?endpoint=trees</code> - Liste des arbres généalogiques</li>
+                        <li><code>GET {$api_url}?endpoint=individuals&tree=TREE_NAME</code> - Liste des individus</li>
+                        <li><code>GET {$api_url}?endpoint=individual&tree=TREE_NAME&xref=XREF</code> - Détails d'un individu</li>
+                        <li><code>GET {$api_url}?endpoint=user</code> - Informations utilisateur</li>
                     </ul>
                     
-                    <h4>Exemples d'utilisation :</h4>
-                    <h5>1. Lister les arbres généalogiques :</h5>
-                    <pre><code>curl -H 'X-API-Key: " . e($current_api_key) . "' \\
-     '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-trees'</code></pre>
-     
-                    <h5>2. Lister les individus d'un arbre :</h5>
-                    <pre><code>curl -H 'X-API-Key: " . e($current_api_key) . "' \\
-     '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-individuals&tree=TREE_NAME'</code></pre>
-     
-                    <h5>3. Obtenir les détails d'un individu :</h5>
-                    <pre><code>curl -H 'X-API-Key: " . e($current_api_key) . "' \\
-     '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-individual&tree=TREE_NAME&xref=I1'</code></pre>
+                    <h4>🚀 Exemples d'utilisation :</h4>
                     
-                    <h5>4. Test rapide avec paramètre GET (pour debug) :</h5>
-                    <pre><code>curl '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-trees&api_key=" . e($current_api_key) . "'</code></pre>
+                    <h5>1. Avec HTTP Basic Auth (recommandé) :</h5>
+                    <pre><code>curl -u 'username:password' '{$api_url}?endpoint=trees'</code></pre>
+                    
+                    <h5>2. Avec paramètres GET (pour tests) :</h5>
+                    <pre><code>curl '{$api_url}?endpoint=trees&username=USERNAME&password=PASSWORD'</code></pre>
+                    
+                    <h5>3. Lister les individus d'un arbre :</h5>
+                    <pre><code>curl -u 'username:password' '{$api_url}?endpoint=individuals&tree=TREE_NAME&limit=10'</code></pre>
+                    
+                    <h5>4. Rechercher des individus :</h5>
+                    <pre><code>curl -u 'username:password' '{$api_url}?endpoint=individuals&tree=TREE_NAME&search=Martin'</code></pre>
+                    
+                    <h5>5. Obtenir les détails d'un individu :</h5>
+                    <pre><code>curl -u 'username:password' '{$api_url}?endpoint=individual&tree=TREE_NAME&xref=I1'</code></pre>
                     
                     <div class='alert alert-warning mt-3'>
-                        <strong>⚠️ Sécurité :</strong> Gardez votre clé API secrète. Ne la partagez pas publiquement et ne l'incluez pas dans du code visible côté client.
+                        <strong>⚠️ Sécurité :</strong>
+                        <ul>
+                            <li>Utilisez HTTPS en production</li>
+                            <li>Les permissions webtrees sont respectées</li>
+                            <li>Seuls les arbres/individus visibles pour l'utilisateur sont accessibles</li>
+                        </ul>
                     </div>
                     
                     <div class='alert alert-success mt-3'>
-                        <strong>✅ Test rapide :</strong> Vous pouvez tester immédiatement avec cette commande :
-                        <pre><code>curl -H 'X-API-Key: " . e($current_api_key) . "' '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-trees'</code></pre>
+                        <strong>✅ Test rapide :</strong>
+                        <p>Remplacez USERNAME et PASSWORD par vos identifiants webtrees :</p>
+                        <pre><code>curl -u 'USERNAME:PASSWORD' '{$api_url}?endpoint=trees'</code></pre>
                     </div>
+                    
+                    <h4>📊 Réponse JSON type :</h4>
+                    <pre><code>{
+  \"success\": true,
+  \"data\": [
+    {
+      \"id\": 1,
+      \"name\": \"tree1\",
+      \"title\": \"Mon arbre généalogique\",
+      \"individuals_count\": 1234
+    }
+  ],
+  \"count\": 1
+}</code></pre>
                 </div>
             </div>
         </div>";
-    }
-
-    /**
-     * Delete API key
-     */
-    private function deleteApiKey(ServerRequestInterface $request): ResponseInterface
-    {
-        $id = $request->getQueryParams()['id'] ?? '';
-
-        if ($id) {
-            $result = DB::table(self::API_KEYS_TABLE)->where('id', '=', $id)->delete();
-            if ($result) {
-                FlashMessages::addMessage(I18N::translate('API key deleted successfully'), 'success');
-            } else {
-                FlashMessages::addMessage('Erreur lors de la suppression de la clé API', 'danger');
-            }
-        }
-
-        return redirect($this->getConfigLink());
     }
 
     /**
@@ -500,37 +512,13 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
         switch ($language) {
             case 'fr':
                 $translations = [
-                    'API REST' => 'API REST',
-                    'API Key Management' => 'Gestion des clés API',
-                    'Generate API Key' => 'Générer une clé API',
-                    'API Key Name' => 'Nom de la clé API',
-                    'API Key' => 'Clé API',
-                    'Created' => 'Créé',
-                    'Actions' => 'Actions',
-                    'Delete' => 'Supprimer',
-                    'Generate' => 'Générer',
-                    'API key generated successfully' => 'Clé API générée avec succès',
-                    'API key deleted successfully' => 'Clé API supprimée avec succès',
-                    'Invalid API key' => 'Clé API invalide',
-                    'Access denied' => 'Accès refusé',
+                    'API REST Configuration' => 'Configuration API REST',
                 ];
                 break;
             case 'en':
             default:
                 $translations = [
-                    'API REST' => 'REST API',
-                    'API Key Management' => 'API Key Management',
-                    'Generate API Key' => 'Generate API Key',
-                    'API Key Name' => 'API Key Name',
-                    'API Key' => 'API Key',
-                    'Created' => 'Created',
-                    'Actions' => 'Actions',
-                    'Delete' => 'Delete',
-                    'Generate' => 'Generate',
-                    'API key generated successfully' => 'API key generated successfully',
-                    'API key deleted successfully' => 'API key deleted successfully',
-                    'Invalid API key' => 'Invalid API key',
-                    'Access denied' => 'Access denied',
+                    'API REST Configuration' => 'REST API Configuration',
                 ];
                 break;
         }
@@ -539,7 +527,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
     }
 
     /**
-     * The module's schema version.
+     * The module\'s schema version.
      */
     public function schemaVersion(): string
     {
