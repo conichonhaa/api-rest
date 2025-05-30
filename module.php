@@ -80,11 +80,29 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
         // Créer la table des clés API si elle n'existe pas
         $this->createApiKeysTable();
         
-        // Enregistrer les routes API dans le système de webtrees
-        Registry::routeFactory()->routeMap()
-            ->get('/api/trees', [$this, 'handleTreesApi'])
-            ->get('/api/individuals', [$this, 'handleIndividualsApi'])
-            ->get('/api/individual', [$this, 'handleIndividualApi']);
+        // Les routes API seront gérées via les actions du module
+        // Pas besoin d'enregistrer des routes séparées
+    }
+
+    /**
+     * Handle module actions (including API endpoints)
+     */
+    public function getAction(ServerRequestInterface $request): ResponseInterface
+    {
+        $action = $request->getQueryParams()['action'] ?? '';
+        
+        switch ($action) {
+            case 'Config':
+                return $this->getConfigAction($request);
+            case 'api-trees':
+                return $this->handleTreesApi($request);
+            case 'api-individuals':
+                return $this->handleIndividualsApi($request);
+            case 'api-individual':
+                return $this->handleIndividualApi($request);
+            default:
+                return $this->getConfigAction($request);
+        }
     }
 
     /**
@@ -419,26 +437,26 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
                     
                     <h4>Endpoints disponibles :</h4>
                     <ul>
-                        <li><code>GET {$base_url}/api/trees</code> - Liste des arbres généalogiques</li>
-                        <li><code>GET {$base_url}/api/individuals?tree=TREE_NAME</code> - Liste des individus d'un arbre</li>
-                        <li><code>GET {$base_url}/api/individual?tree=TREE_NAME&xref=XREF</code> - Détails d'un individu</li>
+                        <li><code>GET {$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-trees</code> - Liste des arbres généalogiques</li>
+                        <li><code>GET {$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-individuals&tree=TREE_NAME</code> - Liste des individus d'un arbre</li>
+                        <li><code>GET {$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-individual&tree=TREE_NAME&xref=XREF</code> - Détails d'un individu</li>
                     </ul>
                     
                     <h4>Exemples d'utilisation :</h4>
                     <h5>1. Lister les arbres généalogiques :</h5>
                     <pre><code>curl -H 'X-API-Key: " . e($current_api_key) . "' \\
-     '{$base_url}/api/trees'</code></pre>
+     '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-trees'</code></pre>
      
                     <h5>2. Lister les individus d'un arbre :</h5>
                     <pre><code>curl -H 'X-API-Key: " . e($current_api_key) . "' \\
-     '{$base_url}/api/individuals?tree=TREE_NAME'</code></pre>
+     '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-individuals&tree=TREE_NAME'</code></pre>
      
                     <h5>3. Obtenir les détails d'un individu :</h5>
                     <pre><code>curl -H 'X-API-Key: " . e($current_api_key) . "' \\
-     '{$base_url}/api/individual?tree=TREE_NAME&xref=I1'</code></pre>
+     '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-individual&tree=TREE_NAME&xref=I1'</code></pre>
                     
                     <h5>4. Test rapide avec paramètre GET (pour debug) :</h5>
-                    <pre><code>curl '{$base_url}/api/trees?api_key=" . e($current_api_key) . "'</code></pre>
+                    <pre><code>curl '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-trees&api_key=" . e($current_api_key) . "'</code></pre>
                     
                     <div class='alert alert-warning mt-3'>
                         <strong>⚠️ Sécurité :</strong> Gardez votre clé API secrète. Ne la partagez pas publiquement et ne l'incluez pas dans du code visible côté client.
@@ -446,7 +464,7 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
                     
                     <div class='alert alert-success mt-3'>
                         <strong>✅ Test rapide :</strong> Vous pouvez tester immédiatement avec cette commande :
-                        <pre><code>curl -H 'X-API-Key: " . e($current_api_key) . "' '{$base_url}/api/trees'</code></pre>
+                        <pre><code>curl -H 'X-API-Key: " . e($current_api_key) . "' '{$base_url}/index.php?route=module&module=" . $this->name() . "&action=api-trees'</code></pre>
                     </div>
                 </div>
             </div>
