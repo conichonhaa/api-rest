@@ -387,9 +387,9 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
         }
 
         // URL de base pour l'API
-        $base_url = request()->getUri()->getScheme() . '://' . request()->getUri()->getHost();
-        if (request()->getUri()->getPort() && !in_array(request()->getUri()->getPort(), [80, 443])) {
-            $base_url .= ':' . request()->getUri()->getPort();
+        $base_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'];
+        if (isset($_SERVER['SERVER_PORT']) && !in_array($_SERVER['SERVER_PORT'], [80, 443])) {
+            $base_url .= ':' . $_SERVER['SERVER_PORT'];
         }
 
         $generate_url = route('module', [
