@@ -129,11 +129,8 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
         // Créer la table des clés API si elle n'existe pas
         $this->createApiKeysTable();
         
-        // Enregistrer les routes API
-        Registry::routeFactory()->routeMap()
-            ->get('/api/v1/trees', [$this, 'getTrees'])
-            ->get('/api/v1/individuals/{tree}', [$this, 'getIndividuals'])
-            ->get('/api/v1/individual/{tree}/{xref}', [$this, 'getIndividual']);
+        // Pour webtrees 2.2, nous devons gérer les routes différemment
+        // Les routes API seront gérées via des actions du module
     }
 
     /**
@@ -167,8 +164,17 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
      */
     public function getConfigAction(ServerRequestInterface $request): ResponseInterface
     {
-        $action = $request->getQueryParams()['action'] ?? 'show';
+        // Gérer les appels API via les paramètres d'URL
+        $query_params = $request->getQueryParams();
+        $action = $query_params['action'] ?? 'show';
+        $api_action = $query_params['api'] ?? '';
         
+        // Si c'est un appel API
+        if ($api_action) {
+            return $this->handleApiRequest($request, $api_action);
+        }
+        
+        // Sinon, gérer la configuration normale
         switch ($action) {
             case 'generate':
                 return $this->generateApiKey($request);
@@ -277,13 +283,13 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
                 <div class='card-body'>
                     <h4>Endpoints disponibles :</h4>
                     <ul>
-                        <li><code>GET /api/v1/trees</code> - Liste des arbres généalogiques</li>
-                        <li><code>GET /api/v1/individuals/{tree}</code> - Liste des individus d'un arbre</li>
-                        <li><code>GET /api/v1/individual/{tree}/{xref}</code> - Détails d'un individu</li>
+                        <li><code>GET " . site_url('/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees') . "</code> - Liste des arbres généalogiques</li>
+                        <li><code>GET " . site_url('/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individuals&amp;tree=TREE_NAME') . "</code> - Liste des individus d'un arbre</li>
+                        <li><code>GET " . site_url('/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individual&amp;tree=TREE_NAME&amp;xref=XREF') . "</code> - Détails d'un individu</li>
                     </ul>
                     <h4>Utilisation :</h4>
                     <p>Ajoutez l'en-tête <code>X-API-Key: votre_cle_api</code> à vos requêtes.</p>
-                    <p>Exemple : <code>curl -H 'X-API-Key: abc123...' " . site_url('/api/v1/trees') . "</code></p>
+                    <p>Exemple : <code>curl -H 'X-API-Key: abc123...' '" . site_url('/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees') . "'</code></p>
                 </div>
             </div>
         </div>";
@@ -329,13 +335,32 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
     }
 
     /**
-     * Validate API key
+     * Handle API requests
      */
-    private function validateApiKey(string $api_key): bool
+    private function handleApiRequest(ServerRequestInterface $request, string $api_action): ResponseInterface
     {
-        return DB::table(self::API_KEYS_TABLE)
-            ->where('api_key', '=', $api_key)
-            ->exists();
+        // Vérifier la clé API
+        if (!$this->checkApiKey($request)) {
+            return response(['error' => I18N::translate('Invalid API key')], 401)
+                ->withHeader('Content-Type', 'application/json');
+        }
+
+        $query_params = $request->getQueryParams();
+        
+        switch ($api_action) {
+            case 'trees':
+                return $this->getTrees($request);
+            case 'individuals':
+                $tree = $query_params['tree'] ?? '';
+                return $this->getIndividuals($request, $tree);
+            case 'individual':
+                $tree = $query_params['tree'] ?? '';
+                $xref = $query_params['xref'] ?? '';
+                return $this->getIndividual($request, $tree, $xref);
+            default:
+                return response(['error' => 'Unknown API endpoint'], 404)
+                    ->withHeader('Content-Type', 'application/json');
+        }
     }
 
     /**
@@ -353,14 +378,20 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
     }
 
     /**
+     * Validate API key
+     */
+    private function validateApiKey(string $api_key): bool
+    {
+        return DB::table(self::API_KEYS_TABLE)
+            ->where('api_key', '=', $api_key)
+            ->exists();
+    }
+
+    /**
      * API: Get all trees
      */
-    public function getTrees(ServerRequestInterface $request): ResponseInterface
+    private function getTrees(ServerRequestInterface $request): ResponseInterface
     {
-        if (!$this->checkApiKey($request)) {
-            return response(['error' => I18N::translate('Invalid API key')], 401);
-        }
-
         $tree_service = Registry::container()->get(TreeService::class);
         $trees = $tree_service->all();
 
@@ -379,22 +410,24 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
     /**
      * API: Get individuals from a tree
      */
-    public function getIndividuals(ServerRequestInterface $request): ResponseInterface
+    private function getIndividuals(ServerRequestInterface $request, string $tree_name): ResponseInterface
     {
-        if (!$this->checkApiKey($request)) {
-            return response(['error' => I18N::translate('Invalid API key')], 401);
+        if (empty($tree_name)) {
+            return response(['error' => 'Tree parameter required'], 400)
+                ->withHeader('Content-Type', 'application/json');
         }
 
-        $tree_name = $request->getAttribute('tree');
         $tree_service = Registry::container()->get(TreeService::class);
         $tree = $tree_service->find($tree_name);
 
         if (!$tree) {
-            return response(['error' => 'Tree not found'], 404);
+            return response(['error' => 'Tree not found'], 404)
+                ->withHeader('Content-Type', 'application/json');
         }
 
-        $limit = min((int) ($request->getQueryParams()['limit'] ?? 50), 100);
-        $offset = max((int) ($request->getQueryParams()['offset'] ?? 0), 0);
+        $query_params = $request->getQueryParams();
+        $limit = min((int) ($query_params['limit'] ?? 50), 100);
+        $offset = max((int) ($query_params['offset'] ?? 0), 0);
 
         $individuals = DB::table('individuals')
             ->where('i_file', '=', $tree->id())
@@ -416,26 +449,26 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
     /**
      * API: Get specific individual
      */
-    public function getIndividual(ServerRequestInterface $request): ResponseInterface
+    private function getIndividual(ServerRequestInterface $request, string $tree_name, string $xref): ResponseInterface
     {
-        if (!$this->checkApiKey($request)) {
-            return response(['error' => I18N::translate('Invalid API key')], 401);
+        if (empty($tree_name) || empty($xref)) {
+            return response(['error' => 'Tree and xref parameters required'], 400)
+                ->withHeader('Content-Type', 'application/json');
         }
-
-        $tree_name = $request->getAttribute('tree');
-        $xref = $request->getAttribute('xref');
         
         $tree_service = Registry::container()->get(TreeService::class);
         $tree = $tree_service->find($tree_name);
 
         if (!$tree) {
-            return response(['error' => 'Tree not found'], 404);
+            return response(['error' => 'Tree not found'], 404)
+                ->withHeader('Content-Type', 'application/json');
         }
 
         $individual = Registry::individualFactory()->make($xref, $tree);
 
         if (!$individual) {
-            return response(['error' => 'Individual not found'], 404);
+            return response(['error' => 'Individual not found'], 404)
+                ->withHeader('Content-Type', 'application/json');
         }
 
         $result = [
