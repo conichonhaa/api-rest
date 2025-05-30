@@ -283,13 +283,15 @@ return new class extends AbstractModule implements ModuleCustomInterface, Module
                 <div class='card-body'>
                     <h4>Endpoints disponibles :</h4>
                     <ul>
-                        <li><code>GET " . site_url('/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees') . "</code> - Liste des arbres généalogiques</li>
-                        <li><code>GET " . site_url('/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individuals&amp;tree=TREE_NAME') . "</code> - Liste des individus d'un arbre</li>
-                        <li><code>GET " . site_url('/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individual&amp;tree=TREE_NAME&amp;xref=XREF') . "</code> - Détails d'un individu</li>
+                        <li><code>GET /index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees</code> - Liste des arbres généalogiques</li>
+                        <li><code>GET /index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individuals&amp;tree=TREE_NAME</code> - Liste des individus d'un arbre</li>
+                        <li><code>GET /index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=individual&amp;tree=TREE_NAME&amp;xref=XREF</code> - Détails d'un individu</li>
                     </ul>
                     <h4>Utilisation :</h4>
                     <p>Ajoutez l'en-tête <code>X-API-Key: votre_cle_api</code> à vos requêtes.</p>
-                    <p>Exemple : <code>curl -H 'X-API-Key: abc123...' '" . site_url('/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees') . "'</code></p>
+                    <p>Exemple :</p>
+                    <pre><code>curl -H 'X-API-Key: votre_cle_api' \
+     'https://votre-domaine.com/index.php?route=module&amp;module=api-rest&amp;action=Config&amp;api=trees'</code></pre>
                 </div>
             </div>
         </div>";
